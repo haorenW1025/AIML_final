@@ -5,6 +5,7 @@ from ple.games.waterworld import WaterWorld
 import time
 import os
 
+
 class NaiveAgent():
     """
             This is our naive agent. It picks actions at random!
@@ -20,28 +21,32 @@ class NaiveAgent():
 # preprocessor example
 def nv_state_preprocessor(state):
 
-   colors = ['G','R','Y']
-   val = state.values()
-   x_pos = state['player_x']/256.0
-   y_pos = state['player_y']/256.0
-   x_vel = state['player_velocity_x']/64.0
-   y_vel = state['player_velocity_y']/64.0
-   tmp = state['creep_pos']
-   all_pos = np.array([])
-   for color in colors:
-       for position in tmp[color]:
-           k = np.array(position)/256.0
-           all_pos = np.append(all_pos,k)
-   all_dist = np.array([])
-   tmp = state['creep_dist']
+    colors = ['G', 'R', 'Y']
+    val = state.values()
+    step = state['step']
+    x_pos = round(state['player_x'])
+    y_pos = round(state['player_y'])
+    x_vel = state['player_velocity_x']
+    y_vel = state['player_velocity_y']
+    tmp = state['creep_pos']
+    all_pos = np.array([])
+    for color in colors:
+        for position in tmp[color]:
+            k = np.array(position)
+            dis_x = x_pos - k[0]
+            dis_y = y_pos - k[1]
+            all_pos = np.append(all_pos, (round(dis_x), round(dis_y)))
+    all_dist = np.array([])
+    tmp = state['creep_dist']
 
-   for color in colors:
-       k = np.array(tmp[color])/362.1
-       all_dist = np.append(all_dist,k)
+    for color in colors:
+        k = np.array(tmp[color])/362.1
+        all_dist = np.append(all_dist, k)
 
-   all_state = np.append([x_pos,y_pos,x_vel,y_vel],all_pos)
+    print step
+    all_state = np.append([step, x_pos, y_pos, x_vel, y_vel], all_pos)
 
-   return all_state.flatten()
+    return all_state.flatten()
 
 
 ###################################
@@ -57,10 +62,12 @@ reward = 0.0
 game = WaterWorld()
 
 # make a PLE instance.
-p = PLE(game,force_fps=force_fps, display_screen=True, state_preprocessor=nv_state_preprocessor)
+p = PLE(game, force_fps=force_fps, display_screen=True,
+        state_preprocessor=nv_state_preprocessor)
 
 # our Naive agent!
 agent = NaiveAgent(p.getActionSet())
+print p.getActionSet()
 
 # init agent and game.
 p.init()
@@ -74,10 +81,10 @@ for i in range(10):
         p.reset_game()
     while p.game_over() == False:
         obs = p.getScreenRGB()
-        print obs.shape
         state = p.getGameState()
+        print state
         action = agent.pickAction(reward, obs)
-        reward = p.act(action) # reward after an action
+        reward = p.act(action)  # reward after an action
     score = game.getScore()
     print "Trial no.{:02d} : score {:0.3f}".format(i,score)
 
