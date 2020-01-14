@@ -14,6 +14,9 @@ from ple.games.waterworld import WaterWorld
 
 # pylint: disable=no-member
 
+os.putenv('SDL_VIDEODRIVER', 'fbcon')
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+
 def nv_state_preprocessor(state):
 
     colors = ['G', 'R', 'Y']
@@ -52,16 +55,12 @@ class DQN(nn.Module):
 
         super(DQN, self).__init__()
         self.main = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=4, stride=2),
+            nn.Linear(23, 256),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            #  Flatten(),
-            #  nn.Linear(7*7*64, 512),
+            nn.Linear(256,128),
+            nn.ReLU()
         )
-        self.fc_value = nn.Linear(512, 1)
+        self.fc_value = nn.Linear(128, 1)
         self.fc_advantage = nn.Linear(512, action_num)
 
         for m in self.modules():
@@ -73,24 +72,24 @@ class DQN(nn.Module):
     def forward(self, x):
         x = self.main(x)
         value = self.fc_value(x)
-        #  advantange = self.fc_advantage(x)
-        #  q = value.expand_as(advantange) + (advantange - advantange.mean(1, keepdim=True).expand_as(advantange))
-        return value
+        advantange = self.fc_advantage(x)
+        q = value.expand_as(advantange) + (advantange - advantange.mean(1, keepdim=True).expand_as(advantange))
+        return q
 
 
 class Agent_DQN():
-    def __init__(self, env, args):
+    def __init__(self, ple_instance):
         """
         Initialize every things you need here.
         For example: building your model
         """
 
-        super(Agent_DQN,self).__init__(env)
         self.device = self._prepare_gpu()
+        self.ple = ple_instance
         self.discount_factor = 0.99
         self.initial_eps = 1
         self.final_eps = 0.025
-        self.exploration_eps = 1000000
+        self.exploration_eps = 100000
         self.batch_size = 32
         self.no_op_steps = 30
         self.replay_start = 5000
@@ -120,7 +119,7 @@ class Agent_DQN():
         ##################
         # YOUR CODE HERE #
         ##################
-        checkpoint = torch.load(self.args.check_path)
+        checkpoint = torch.load('save_model/model_best.pth.tar')
         self.current_Q.load_state_dict(checkpoint['state_dict'])
         self.current_Q.eval()
         self.current_Q.to(self.device)
@@ -143,10 +142,9 @@ class Agent_DQN():
         next_state = torch.stack(next_state).type(torch.FloatTensor).to(self.device).squeeze() / 255.0
         batch_action = torch.stack(batch_action).type(torch.LongTensor).to(self.device).squeeze()
         batch_reward = torch.stack(batch_reward).type(torch.FloatTensor).to(self.device).squeeze()
-        batch_done = torch.stack(batch_done).type(torch.FloatTensor).to(self.device).squeeze()
 
         q_prediction = self.current_Q(current_state).gather(1, batch_action.unsqueeze(1)).squeeze(1)
-        target_q = ((self.target_Q(next_state).detach().max(-1)[0] * (1 - batch_done) * self.discount_factor) + batch_reward)
+        target_q = ((self.target_Q(next_state).detach().max(-1)[0] * self.discount_factor) + batch_reward)
 
         self.optimizer.zero_grad()
         loss = F.smooth_l1_loss(q_prediction, target_q)
@@ -166,21 +164,22 @@ class Agent_DQN():
         step = 0
         loss = []
         current_eps = 1
+        self.ple.init()
 
         for e in range(1, self.episode+1):
-            observation = self.env.reset()
-            #observation = observation.astype(np.float64)
+            if self.ple.game_over:
+                self.ple.reset_game()
+            observation = self.ple.getGameState()
             done = False
             reward_sum = 0
 
-            while not done:
-                #self.env.env.render()
+            while self.ple.game_over() == False:
                 if step > self.replay_start:
                     current_eps = self.epsilon(step)
                 action = random.choice([0,1,2,3,4]) if random.random() < current_eps \
                     else self.make_action(observation, False)
-                next_ob, reward, done, info = self.env.step(action + 1)
-                #next_ob = next_ob.astype(np.float64)
+                reward = p.act(self.action[action])
+                next_ob = self.ple.getGameState()
                 reward_sum += reward
                 step += 1
                 self.memory.append((
@@ -188,7 +187,6 @@ class Agent_DQN():
                     torch.ByteTensor([next_ob]),
                     torch.ByteTensor([action]),
                     torch.ByteTensor([reward]),
-                    torch.ByteTensor([done])
                 ))
                 observation = next_ob
 
@@ -230,16 +228,24 @@ class Agent_DQN():
         ##################
         # YOUR CODE HERE #
         ##################
-        observation = np.array(observation).astype(np.float32) / 255.0
         action = self.current_Q((torch.FloatTensor(observation).unsqueeze(0)).to(self.device)).max(-1)[1].data[0]
-        return action.item() + 1 if test else action.item()
+        return action.item()
 
     def _prepare_gpu(self):
         n_gpu = torch.cuda.device_count()
         device = torch.device('cuda:0' if n_gpu > 0 else 'cpu')
         return device
 
+
+def main():
+    force_fps = True  # slower speed
+    reward = 0.0
+    game = WaterWorld()
+    p = PLE(game, force_fps=force_fps, display_screen=False,
+            state_preprocessor=nv_state_preprocessor)
+    agent = Agent_DQN(p)
+    agent.train()
+
+
 if __name__ == "__main__":
-    from torchsummary import summary
-    model = DQN();
-    summary(model, input_size=(3, 200, 200), device='cpu')
+    main()
